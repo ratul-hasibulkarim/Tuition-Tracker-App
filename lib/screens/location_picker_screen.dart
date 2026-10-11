@@ -30,6 +30,62 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   GoogleMapController? _map;
   late LatLng _center = widget.initial ?? _dhaka;
   bool _saving = false;
+  final _search = TextEditingController();
+  bool _searching = false;
+  List<PickedLocation>? _results;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// Looks up a typed address with the phone's built-in geocoder (free).
+  Future<void> _runSearch() async {
+    var q = _search.text.trim();
+    if (q.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    if (!q.toLowerCase().contains('bangladesh')) q = '$q, Bangladesh';
+    setState(() {
+      _searching = true;
+      _results = null;
+    });
+    final found = <PickedLocation>[];
+    try {
+      final geo = Geocoding();
+      final locations = await geo.locationFromAddress(q);
+      for (final l in locations.take(5)) {
+        var label = _search.text.trim();
+        try {
+          final marks = await geo.placemarkFromCoordinates(l.latitude, l.longitude);
+          if (marks.isNotEmpty) label = _describe(marks.first);
+        } catch (_) {}
+        found.add(PickedLocation(LatLng(l.latitude, l.longitude), label));
+      }
+    } catch (_) {
+      // No match: show "no places found".
+    }
+    if (!mounted) return;
+    setState(() {
+      _searching = false;
+      _results = found;
+    });
+    if (found.length == 1) _goTo(found.single);
+  }
+
+  void _goTo(PickedLocation p) {
+    _map?.animateCamera(CameraUpdate.newLatLngZoom(p.latLng, 17));
+    setState(() {
+      _center = p.latLng;
+      _results = null;
+    });
+  }
+
+  static String _describe(Placemark m) => [m.name, m.street, m.subLocality, m.locality]
+      .whereType<String>()
+      .where((p) => p.trim().isNotEmpty)
+      .toSet()
+      .join(', ');
 
   @override
   void initState() {
@@ -59,14 +115,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         _center.latitude,
         _center.longitude,
       );
-      if (marks.isNotEmpty) {
-        final m = marks.first;
-        address = [m.name, m.subLocality, m.locality]
-            .whereType<String>()
-            .where((p) => p.trim().isNotEmpty)
-            .toSet()
-            .join(', ');
-      }
+      if (marks.isNotEmpty) address = _describe(marks.first);
     } catch (_) {
       // Geocoding is a nice-to-have; the coordinates are what matter.
     }
@@ -99,11 +148,54 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             top: 12,
             left: 16,
             right: 16,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(s.moveMapHint, textAlign: TextAlign.center),
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Material(
+                  elevation: 2,
+                  borderRadius: BorderRadius.circular(8),
+                  child: TextField(
+                    controller: _search,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _runSearch(),
+                    decoration: InputDecoration(
+                      hintText: s.searchAddress,
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                  width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                            )
+                          : IconButton(icon: const Icon(Icons.arrow_forward), onPressed: _runSearch),
+                    ),
+                  ),
+                ),
+                if (_results != null)
+                  Card(
+                    margin: const EdgeInsets.only(top: 4),
+                    child: _results!.isEmpty
+                        ? ListTile(title: Text(s.noResults))
+                        : Column(
+                            children: [
+                              for (final r in _results!)
+                                ListTile(
+                                  leading: const Icon(Icons.place_outlined),
+                                  title: Text(r.address.isEmpty ? _search.text : r.address),
+                                  onTap: () => _goTo(r),
+                                ),
+                            ],
+                          ),
+                  )
+                else
+                  Card(
+                    margin: const EdgeInsets.only(top: 4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(s.moveMapHint, textAlign: TextAlign.center),
+                    ),
+                  ),
+              ],
             ),
           ),
           Positioned(

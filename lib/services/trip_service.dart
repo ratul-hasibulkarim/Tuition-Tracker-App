@@ -4,10 +4,21 @@ import 'dart:math';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
-/// Optional Google Maps Platform key, passed at build time:
-/// `flutter build apk --dart-define=MAPS_API_KEY=...`
-/// Without it, trip times are estimated from straight-line distance.
+import 'api_client.dart';
+
+/// Optional Google Maps key used directly from the app when no server is
+/// set up: `--dart-define=MAPS_API_KEY=...`. Prefer the server (API_BASE_URL)
+/// for store builds so the key is not inside the app.
 const mapsApiKey = String.fromEnvironment('MAPS_API_KEY');
+
+class LatLngPoint {
+  const LatLngPoint(this.lat, this.lng);
+
+  final double lat;
+  final double lng;
+
+  Map<String, double> toJson() => {'lat': lat, 'lng': lng};
+}
 
 class TripEstimate {
   const TripEstimate({required this.km, required this.minutes, required this.live});
@@ -19,7 +30,20 @@ class TripEstimate {
   final bool live;
 }
 
+/// Travel minutes and km between every pair of points.
+class TravelMatrix {
+  const TravelMatrix({required this.minutes, required this.km, required this.live});
+
+  final List<List<double>> minutes;
+  final List<List<double>> km;
+  final bool live;
+}
+
 class TripService {
+  TripService({ApiClient? api}) : _api = api ?? ApiClient();
+
+  final ApiClient _api;
+
   /// Returns the phone's position, asking for permission if needed.
   /// Returns null when location is off or permission is denied.
   static Future<Position?> currentPosition() async {
@@ -39,26 +63,74 @@ class TripService {
     );
   }
 
-  static Future<TripEstimate> estimate({
-    required double fromLat,
-    required double fromLng,
-    required double toLat,
-    required double toLng,
-  }) async {
-    if (mapsApiKey.isNotEmpty) {
-      try {
-        final live = await _routesApi(fromLat, fromLng, toLat, toLng);
+  /// Live-traffic estimate via the server (or a direct key), else a rough one.
+  Future<TripEstimate> estimate(LatLngPoint from, LatLngPoint to) async {
+    try {
+      if (_api.configured) {
+        final r = await _api.post('/v1/route', {'origin': from.toJson(), 'destination': to.toJson()});
+        return TripEstimate(
+          km: (r['km'] as num).toDouble(),
+          minutes: (r['minutes'] as num).toDouble(),
+          live: true,
+        );
+      }
+      if (mapsApiKey.isNotEmpty) {
+        final live = await _routesApiDirect(from, to);
         if (live != null) return live;
+      }
+    } catch (_) {
+      // Fall back to the offline estimate below.
+    }
+    return roughEstimate(from, to);
+  }
+
+  /// Travel times between all [points] (max 10 for the live version).
+  Future<TravelMatrix> matrix(List<LatLngPoint> points) async {
+    if (_api.configured && points.length >= 2 && points.length <= 10) {
+      try {
+        final r = await _api.post('/v1/route-matrix', {
+          'points': points.map((p) => p.toJson()).toList(),
+        });
+        final rough = roughMatrix(points);
+        List<List<double>> read(String key, List<List<double>> fallback) => [
+              for (var i = 0; i < points.length; i++)
+                [
+                  for (var j = 0; j < points.length; j++)
+                    ((r[key] as List)[i] as List)[j] == null
+                        ? fallback[i][j]
+                        : (((r[key] as List)[i] as List)[j] as num).toDouble(),
+                ],
+            ];
+        return TravelMatrix(
+          minutes: read('minutes', rough.minutes),
+          km: read('km', rough.km),
+          live: true,
+        );
       } catch (_) {
-        // Fall back to the offline estimate below.
+        // Use the rough matrix.
       }
     }
-    return roughEstimate(fromLat, fromLng, toLat, toLng);
+    return roughMatrix(points);
+  }
+
+  static TravelMatrix roughMatrix(List<LatLngPoint> points) {
+    final n = points.length;
+    final minutes = List.generate(n, (_) => List.filled(n, 0.0));
+    final km = List.generate(n, (_) => List.filled(n, 0.0));
+    for (var i = 0; i < n; i++) {
+      for (var j = 0; j < n; j++) {
+        if (i == j) continue;
+        final t = roughEstimate(points[i], points[j]);
+        minutes[i][j] = t.minutes;
+        km[i][j] = t.km;
+      }
+    }
+    return TravelMatrix(minutes: minutes, km: km, live: false);
   }
 
   /// Straight-line distance × 1.35 road factor, at ~18 km/h city bike speed.
-  static TripEstimate roughEstimate(double lat1, double lng1, double lat2, double lng2) {
-    final km = haversineKm(lat1, lng1, lat2, lng2) * 1.35;
+  static TripEstimate roughEstimate(LatLngPoint a, LatLngPoint b) {
+    final km = haversineKm(a.lat, a.lng, b.lat, b.lng) * 1.35;
     return TripEstimate(km: km, minutes: km / 18 * 60, live: false);
   }
 
@@ -72,8 +144,12 @@ class TripService {
     return 2 * r * asin(sqrt(a));
   }
 
-  static Future<TripEstimate?> _routesApi(
-      double fromLat, double fromLng, double toLat, double toLng) async {
+  static Future<TripEstimate?> _routesApiDirect(LatLngPoint from, LatLngPoint to) async {
+    Map<String, dynamic> wp(LatLngPoint p) => {
+          'location': {
+            'latLng': {'latitude': p.lat, 'longitude': p.lng}
+          }
+        };
     for (final mode in ['TWO_WHEELER', 'DRIVE']) {
       final res = await http
           .post(
@@ -84,16 +160,8 @@ class TripService {
               'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters',
             },
             body: jsonEncode({
-              'origin': {
-                'location': {
-                  'latLng': {'latitude': fromLat, 'longitude': fromLng}
-                }
-              },
-              'destination': {
-                'location': {
-                  'latLng': {'latitude': toLat, 'longitude': toLng}
-                }
-              },
+              'origin': wp(from),
+              'destination': wp(to),
               'travelMode': mode,
               'routingPreference': 'TRAFFIC_AWARE',
             }),
@@ -104,7 +172,6 @@ class TripService {
       if (routes == null || routes.isEmpty) continue;
       final r = routes.first as Map<String, dynamic>;
       final meters = (r['distanceMeters'] as num?)?.toDouble() ?? 0;
-      // Duration comes as e.g. "1234s".
       final secs = double.tryParse((r['duration'] as String? ?? '0s').replaceAll('s', '')) ?? 0;
       return TripEstimate(km: meters / 1000, minutes: secs / 60, live: true);
     }

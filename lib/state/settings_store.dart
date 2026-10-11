@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/ai_service.dart';
 
 enum ViewMode { list, grid }
 
@@ -25,12 +28,31 @@ class FareRates {
 }
 
 class SettingsStore extends ChangeNotifier {
+  SettingsStore({FlutterSecureStorage? secure})
+      : _secure = secure ?? const FlutterSecureStorage();
+
   late SharedPreferences _prefs;
+  final FlutterSecureStorage _secure;
 
   ThemeMode themeMode = ThemeMode.system;
   Locale locale = const Locale('en');
   ViewMode viewMode = ViewMode.list;
   FareRates fare = const FareRates();
+
+  /// Where the teacher starts the day (usually home), for routine planning.
+  double? homeLat;
+  double? homeLng;
+  String homeLabel = '';
+
+  /// How many minutes earlier/later than usual a class may move when the
+  /// routine planner looks for a shorter travel order.
+  int flexMinutes = 30;
+
+  AiProvider aiProvider = AiProvider.gemini;
+  String aiModel = '';
+  String aiKey = '';
+
+  bool get hasHome => homeLat != null && homeLng != null;
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
@@ -47,7 +69,50 @@ class SettingsStore extends ChangeNotifier {
       perMinute: _prefs.getDouble('farePerMinute') ?? d.perMinute,
       minimum: _prefs.getDouble('fareMinimum') ?? d.minimum,
     );
+    homeLat = _prefs.getDouble('homeLat');
+    homeLng = _prefs.getDouble('homeLng');
+    homeLabel = _prefs.getString('homeLabel') ?? '';
+    flexMinutes = _prefs.getInt('flexMinutes') ?? 30;
+    aiProvider = AiProvider.values.firstWhere(
+      (p) => p.name == _prefs.getString('aiProvider'),
+      orElse: () => AiProvider.gemini,
+    );
+    aiModel = _prefs.getString('aiModel') ?? '';
+    try {
+      aiKey = await _secure.read(key: 'aiKey') ?? '';
+    } catch (_) {
+      aiKey = '';
+    }
     notifyListeners();
+  }
+
+  AiService aiService() =>
+      AiService(provider: aiProvider, model: aiModel, ownKey: aiKey);
+
+  Future<void> setHome(double lat, double lng, String label) async {
+    homeLat = lat;
+    homeLng = lng;
+    homeLabel = label;
+    notifyListeners();
+    await _prefs.setDouble('homeLat', lat);
+    await _prefs.setDouble('homeLng', lng);
+    await _prefs.setString('homeLabel', label);
+  }
+
+  Future<void> setFlexMinutes(int m) async {
+    flexMinutes = m;
+    notifyListeners();
+    await _prefs.setInt('flexMinutes', m);
+  }
+
+  Future<void> setAi(AiProvider provider, String model, String key) async {
+    aiProvider = provider;
+    aiModel = model.trim();
+    aiKey = key.trim();
+    notifyListeners();
+    await _prefs.setString('aiProvider', provider.name);
+    await _prefs.setString('aiModel', aiModel);
+    await _secure.write(key: 'aiKey', value: aiKey);
   }
 
   bool get isBangla => locale.languageCode == 'bn';

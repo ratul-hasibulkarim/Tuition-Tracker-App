@@ -107,6 +107,7 @@ class Student {
     required this.name,
     this.className = '',
     this.subjects = '',
+    this.batch = '',
     this.address = '',
     this.latitude,
     this.longitude,
@@ -134,6 +135,9 @@ class Student {
   String name;
   String className;
   String subjects;
+
+  /// Coaching batch/group name; empty for one-to-one tuitions.
+  String batch;
   String address;
   double? latitude;
   double? longitude;
@@ -222,6 +226,7 @@ class Student {
         'name': name,
         'className': className,
         'subjects': subjects,
+        'batch': batch,
         'address': address,
         'latitude': latitude,
         'longitude': longitude,
@@ -245,6 +250,7 @@ class Student {
         name: j['name'] as String? ?? '',
         className: j['className'] as String? ?? '',
         subjects: j['subjects'] as String? ?? '',
+        batch: j['batch'] as String? ?? '',
         address: j['address'] as String? ?? '',
         latitude: (j['latitude'] as num?)?.toDouble(),
         longitude: (j['longitude'] as num?)?.toDouble(),

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -103,14 +105,13 @@ class DaySheet extends StatelessWidget {
 
   Future<void> _addNote(BuildContext context, Student st) async {
     final store = context.read<StudentStore>();
-    final result = await showDialog<(String, List<String>)>(
+    final result = await showDialog<_NoteResult>(
       context: context,
       builder: (_) => const _NoteDialog(),
     );
     if (result == null) return;
-    final (text, images) = result;
-    if (text.trim().isEmpty && images.isEmpty) return;
-    await store.addNote(st, day, text, images);
+    if (result.text.trim().isEmpty && result.newImages.isEmpty) return;
+    await store.addNote(st, day, result.text, result.newImages);
   }
 }
 
@@ -120,6 +121,16 @@ class _NoteTile extends StatelessWidget {
   final Student student;
   final DayNote note;
   final bool deletable;
+
+  Future<void> _edit(BuildContext context) async {
+    final store = context.read<StudentStore>();
+    final result = await showDialog<_NoteResult>(
+      context: context,
+      builder: (_) => _NoteDialog(existing: note),
+    );
+    if (result == null) return;
+    await store.updateNote(student, note, result.text, result.keptImages, result.newImages);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +146,13 @@ class _NoteTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: Text(note.text)),
+                if (deletable)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: S.of(context).editNote,
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => _edit(context),
+                  ),
                 if (deletable)
                   IconButton(
                     visualDensity: VisualDensity.compact,
@@ -181,15 +199,30 @@ class _NoteTile extends StatelessWidget {
   }
 }
 
+class _NoteResult {
+  const _NoteResult(this.text, this.keptImages, this.newImages);
+
+  final String text;
+
+  /// Saved photo names the teacher kept (when editing).
+  final List<String> keptImages;
+
+  /// Paths of newly picked photos.
+  final List<String> newImages;
+}
+
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog();
+  const _NoteDialog({this.existing});
+
+  final DayNote? existing;
 
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
 }
 
 class _NoteDialogState extends State<_NoteDialog> {
-  final _text = TextEditingController();
+  late final _text = TextEditingController(text: widget.existing?.text);
+  late final _kept = [...?widget.existing?.imagePaths];
   final _images = <XFile>[];
   final _picker = ImagePicker();
 
@@ -212,8 +245,24 @@ class _NoteDialogState extends State<_NoteDialog> {
   @override
   Widget build(BuildContext context) {
     final s = S.of(context);
+    final store = context.read<StudentStore>();
+    Widget thumb(Widget image, VoidCallback onRemove) => Stack(
+          children: [
+            ClipRRect(borderRadius: BorderRadius.circular(8), child: image),
+            Positioned(
+              right: 0,
+              top: 0,
+              child: InkWell(
+                onTap: onRemove,
+                child: const CircleAvatar(
+                    radius: 12, backgroundColor: Colors.black54,
+                    child: Icon(Icons.close, size: 14, color: Colors.white)),
+              ),
+            ),
+          ],
+        );
     return AlertDialog(
-      title: Text(s.addNote),
+      title: Text(widget.existing == null ? s.addNote : s.editNote),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -245,9 +294,26 @@ class _NoteDialogState extends State<_NoteDialog> {
                 ),
               ],
             ),
-            if (_images.isNotEmpty) ...[
+            if (_kept.isNotEmpty || _images.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text('${_images.length} 📷'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final name in _kept)
+                    thumb(
+                      Image.file(store.imageFile(name), width: 64, height: 64, fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox(width: 64, height: 64)),
+                      () => setState(() => _kept.remove(name)),
+                    ),
+                  for (final x in _images)
+                    thumb(
+                      Image.file(File(x.path), width: 64, height: 64, fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox(width: 64, height: 64)),
+                      () => setState(() => _images.remove(x)),
+                    ),
+                ],
+              ),
             ],
           ],
         ),
@@ -255,8 +321,10 @@ class _NoteDialogState extends State<_NoteDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: Text(s.cancel)),
         FilledButton(
-          onPressed: () =>
-              Navigator.pop(context, (_text.text, _images.map((x) => x.path).toList())),
+          onPressed: () => Navigator.pop(
+            context,
+            _NoteResult(_text.text, _kept, _images.map((x) => x.path).toList()),
+          ),
           child: Text(s.save),
         ),
       ],

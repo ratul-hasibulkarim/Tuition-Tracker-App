@@ -57,11 +57,9 @@ class _TripSheetState extends State<TripSheet> {
         });
         return;
       }
-      final trip = await TripService.estimate(
-        fromLat: pos.latitude,
-        fromLng: pos.longitude,
-        toLat: st.latitude!,
-        toLng: st.longitude!,
+      final trip = await TripService().estimate(
+        LatLngPoint(pos.latitude, pos.longitude),
+        LatLngPoint(st.latitude!, st.longitude!),
       );
       if (mounted) {
         setState(() {
@@ -110,11 +108,11 @@ class _TripSheetState extends State<TripSheet> {
             else if (trip != null) ...[
               Row(
                 children: [
-                  _Stat(label: s.distance, value: '${trip.km.toStringAsFixed(1)} km'),
-                  _Stat(label: s.travelTime, value: '${trip.minutes.round()} min'),
+                  _Stat(label: s.distance, value: s.km(trip.km)),
+                  _Stat(label: s.travelTime, value: s.minutes(trip.minutes)),
                   _Stat(
                     label: s.bikeFare,
-                    value: '৳${fare.estimate(km: trip.km, minutes: trip.minutes).round()}',
+                    value: s.money(fare.estimate(km: trip.km, minutes: trip.minutes)),
                     highlight: true,
                   ),
                 ],

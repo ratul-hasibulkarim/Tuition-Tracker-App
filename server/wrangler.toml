@@ -1,0 +1,19 @@
+name = "tuition-tracker-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Optional AI provider override (any OpenAI-compatible API).
+# [vars]
+# AI_BASE_URL = "https://openrouter.ai/api/v1"
+# AI_MODEL = "deepseek/deepseek-chat-v3.1:free"
+
+# 60 requests per minute per IP address.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+# Secrets (set with `npx wrangler secret put NAME`, never commit them):
+#   APP_TOKEN     - random string, also passed to the app as APP_TOKEN
+#   MAPS_API_KEY  - Google Maps Platform key with the Routes API enabled
+#   AI_API_KEY    - Gemini (or other provider) API key

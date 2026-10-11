@@ -90,7 +90,8 @@ void main() {
 
   test('rough trip estimate is sensible for Dhaka distances', () {
     // Dhanmondi 27 to Gulshan 1 is roughly 6-7 km straight line.
-    final t = TripService.roughEstimate(23.7561, 90.3720, 23.7806, 90.4166);
+    final t = TripService.roughEstimate(
+        const LatLngPoint(23.7561, 90.3720), const LatLngPoint(23.7806, 90.4166));
     expect(t.km, inInclusiveRange(6, 10));
     expect(t.live, isFalse);
   });

@@ -37,6 +37,25 @@ class Launcher {
         mode: LaunchMode.externalApplication,
       );
 
+  /// The whole day's route (home → students in order → home) in Google Maps.
+  /// Google Maps links allow up to 9 stops in between.
+  static Future<bool> dayRoute({String? home, required List<Student> stops}) {
+    final located = stops.where((s) => s.hasLocation).map(_destination).toList();
+    if (located.isEmpty) return Future.value(false);
+    final destination = home ?? located.removeLast();
+    final waypoints = located.take(9).join('|');
+    return launchUrl(
+      Uri.https('www.google.com', '/maps/dir/', {
+        'api': '1',
+        'origin': ?home,
+        'destination': destination,
+        if (waypoints.isNotEmpty) 'waypoints': waypoints,
+        'travelmode': 'two-wheeler',
+      }),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
   /// Uber's universal link with the drop-off pre-filled.
   static Future<bool> uber(Student s) {
     final params = <String, String>{

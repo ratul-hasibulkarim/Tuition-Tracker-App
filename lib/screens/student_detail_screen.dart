@@ -9,6 +9,7 @@ import '../services/launcher.dart';
 import '../state/settings_store.dart';
 import '../state/student_store.dart';
 import '../widgets/trip_sheet.dart';
+import '../utils/format.dart';
 import 'day_sheet.dart';
 import 'student_form_screen.dart';
 
@@ -32,7 +33,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     if (st == null) return const Scaffold();
     final theme = Theme.of(context);
     final locale = context.watch<SettingsStore>().locale.languageCode;
-    final money = NumberFormat.decimalPattern(locale);
     final dateFmt = DateFormat.yMMMd(locale);
 
     return Scaffold(
@@ -117,9 +117,9 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
           // Metrics
           Row(
             children: [
-              _Metric(label: s.totalClasses, value: '${st.totalSessions}'),
+              _Metric(label: s.totalClasses, value: s.n(st.totalSessions)),
               const SizedBox(width: 8),
-              _Metric(label: s.totalReceived, value: '৳${money.format(st.totalReceived)}'),
+              _Metric(label: s.totalReceived, value: s.money(st.totalReceived)),
               const SizedBox(width: 8),
               _Metric(
                 label: s.lastPayment,
@@ -130,7 +130,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
           if (_dueEstimate(st) case final due?) ...[
             const SizedBox(height: 8),
             Row(children: [
-              _Metric(label: s.dueEstimate, value: '৳${money.format(due.round())}'),
+              _Metric(label: s.dueEstimate, value: s.money(due)),
             ]),
           ],
           const SizedBox(height: 12),
@@ -167,7 +167,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                           bottom: 2,
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
                             if (events.length > 1)
-                              Text('×${events.length}', style: theme.textTheme.labelSmall),
+                              Text('×${s.n(events.length)}', style: theme.textTheme.labelSmall),
                             if (hasNotes)
                               Icon(Icons.sticky_note_2, size: 10, color: theme.colorScheme.tertiary),
                           ]),
@@ -209,8 +209,9 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                     for (final p in st.payments.reversed)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
+                        onTap: () => _editPayment(st, p),
                         leading: const Icon(Icons.check_circle_outline),
-                        title: Text('৳${money.format(p.amount)}'),
+                        title: Text(s.money(p.amount)),
                         subtitle: Text([dateFmt.format(p.date), if (p.note.isNotEmpty) p.note].join(' · ')),
                         trailing: IconButton(
                           tooltip: s.delete,
@@ -247,7 +248,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         border: today ? Border.all(color: theme.colorScheme.primary, width: 2) : null,
       ),
       child: Text(
-        '${day.day}',
+        S.of(ctx).n(day.day),
         style: TextStyle(
           color: taught ? theme.colorScheme.onPrimary : null,
           fontWeight: taught || today ? FontWeight.w700 : null,
@@ -297,6 +298,16 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     await store.delete(st);
   }
 
+  Future<void> _editPayment(Student st, Payment p) async {
+    final edited = await showDialog<Payment>(
+      context: context,
+      builder: (_) => _PaymentDialog(existing: p),
+    );
+    if (edited != null && mounted) {
+      await context.read<StudentStore>().updatePayment(st, edited);
+    }
+  }
+
   Future<void> _recordPayment(Student st) async {
     final payment = await showDialog<Payment>(
       context: context,
@@ -335,7 +346,7 @@ class _MoreDetails extends StatelessWidget {
     ];
     final schedule = st.schedule
         .map((x) =>
-            '${s.weekday(x.weekday)} ${TimeOfDay(hour: x.startMinutes ~/ 60, minute: x.startMinutes % 60).format(context)}')
+            '${s.weekday(x.weekday)} ${formatMinutes(context, x.startMinutes)}')
         .join(', ');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -346,9 +357,9 @@ class _MoreDetails extends StatelessWidget {
           if (number.isNotEmpty) row(icon, label, number, onTap: () => Launcher.call(number)),
         row(Icons.star_outline, s.defaultCallNumber, s.contactLabel(st.defaultContact.name)),
         if (st.monthlyFee != null)
-          row(Icons.payments_outlined, s.monthlyFee, st.monthlyFee!.round().toString()),
+          row(Icons.payments_outlined, s.monthlyFee, s.money(st.monthlyFee!)),
         if (st.daysPerCycle != null)
-          row(Icons.event_repeat, s.daysPerCycle, '${st.daysPerCycle}'),
+          row(Icons.event_repeat, s.daysPerCycle, s.n(st.daysPerCycle!)),
         if (schedule.isNotEmpty) row(Icons.schedule, s.weeklySchedule, schedule),
         Align(
           alignment: Alignment.centerLeft,
@@ -394,9 +405,12 @@ class _Metric extends StatelessWidget {
 }
 
 class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({this.defaultAmount});
+  const _PaymentDialog({this.defaultAmount, this.existing});
 
   final double? defaultAmount;
+
+  /// When set, the dialog edits this payment instead of creating one.
+  final Payment? existing;
 
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
@@ -404,9 +418,12 @@ class _PaymentDialog extends StatefulWidget {
 
 class _PaymentDialogState extends State<_PaymentDialog> {
   late final _amount = TextEditingController(
-      text: widget.defaultAmount == null ? '' : widget.defaultAmount!.round().toString());
-  final _note = TextEditingController();
-  DateTime _date = DateTime.now();
+      text: _fmtAmount(widget.existing?.amount ?? widget.defaultAmount));
+  late final _note = TextEditingController(text: widget.existing?.note);
+  late DateTime _date = widget.existing?.date ?? DateTime.now();
+
+  static String _fmtAmount(double? v) =>
+      v == null ? '' : (v == v.roundToDouble() ? v.round().toString() : v.toString());
   String? _error;
 
   @override
@@ -421,7 +438,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     final s = S.of(context);
     final locale = context.watch<SettingsStore>().locale.languageCode;
     return AlertDialog(
-      title: Text(s.recordPayment),
+      title: Text(widget.existing == null ? s.recordPayment : s.editPayment),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -465,7 +482,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               setState(() => _error = s.invalidNumber);
               return;
             }
-            Navigator.pop(context, Payment(date: _date, amount: v, note: _note.text.trim()));
+            Navigator.pop(
+              context,
+              Payment(id: widget.existing?.id, date: _date, amount: v, note: _note.text.trim()),
+            );
           },
           child: Text(s.save),
         ),

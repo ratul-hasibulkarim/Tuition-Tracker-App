@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../l10n/strings.dart';
 import '../models/student.dart';
 import '../state/student_store.dart';
+import '../utils/format.dart';
 import 'location_picker_screen.dart';
 
 /// Add a new tuition, or edit an existing one when [student] is given.
@@ -24,6 +25,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   late final _name = TextEditingController(text: _existing?.name);
   late final _className = TextEditingController(text: _existing?.className);
   late final _subjects = TextEditingController(text: _existing?.subjects);
+  late final _batch = TextEditingController(text: _existing?.batch);
   late final _address = TextEditingController(text: _existing?.address);
   late final _studentPhone = TextEditingController(text: _existing?.studentPhone);
   late final _whatsapp = TextEditingController(text: _existing?.whatsapp);
@@ -43,7 +45,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   @override
   void dispose() {
     for (final c in [
-      _name, _className, _subjects, _address, _studentPhone,
+      _name, _className, _subjects, _batch, _address, _studentPhone,
       _whatsapp, _father, _mother, _fee, _cycle,
     ]) {
       c.dispose();
@@ -108,6 +110,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       ..name = _name.text.trim()
       ..className = _className.text.trim()
       ..subjects = _subjects.text.trim()
+      ..batch = _batch.text.trim()
       ..address = _address.text.trim()
       ..latitude = _lat
       ..longitude = _lng
@@ -129,6 +132,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   Widget build(BuildContext context) {
     final s = S.of(context);
     final theme = Theme.of(context);
+    final batches = context.watch<StudentStore>().batches;
     String? numberValidator(String? v) {
       final t = v?.trim() ?? '';
       if (t.isEmpty) return null;
@@ -192,6 +196,28 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _batch,
+              decoration: InputDecoration(
+                labelText: s.batch,
+                helperText: s.batchHelp,
+                prefixIcon: const Icon(Icons.groups_outlined),
+              ),
+            ),
+            if (batches.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final b in batches)
+                    ActionChip(
+                      label: Text(b),
+                      onPressed: () => setState(() => _batch.text = b),
+                    ),
+                ],
+              ),
+            ],
             section(s.address),
             TextFormField(
               controller: _address,
@@ -262,7 +288,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                 for (final slot in _schedule)
                   InputChip(
                     label: Text(
-                        '${s.weekday(slot.weekday)} ${TimeOfDay(hour: slot.startMinutes ~/ 60, minute: slot.startMinutes % 60).format(context)}'),
+                        '${s.weekday(slot.weekday)} ${formatMinutes(context, slot.startMinutes)}'),
                     onDeleted: () => setState(() => _schedule.remove(slot)),
                   ),
                 ActionChip(

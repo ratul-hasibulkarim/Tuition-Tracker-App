@@ -40,7 +40,7 @@ class StudentCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            cycle == null ? '$count' : '$count/$cycle',
+            s.n(cycle == null ? '$count' : '$count/$cycle'),
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: due ? theme.colorScheme.error : theme.colorScheme.primary,
